@@ -1,4 +1,4 @@
-dist
+# dist/ is tracked so the fork can be consumed via file: without a local build.
 # Logs
 logs
 *.log
