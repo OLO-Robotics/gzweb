@@ -5410,6 +5410,8 @@
     }, {
       key: "loadMTL",
       value: function loadMTL(_text) {
+        var _this = this;
+
         if (!_text) {
           return;
         } // Handle model:// URI
@@ -5464,6 +5466,24 @@
           if (line.indexOf('/materials/textures') > 0 && !this.usingRawFiles) {
             newText += line += '\n';
             continue;
+          } // Many Fuel models use map_Kd ../materials/foo.png (texture directly under
+          // materials/, not materials/textures/). The generic rewriter below would turn
+          // that into .../materials/textures/../materials/foo.png which resolves to a
+          // duplicate materials/materials/ path and 404s on Fuel.
+
+
+          if (!this.usingRawFiles && (line.indexOf('map_Ka') >= 0 || line.indexOf('map_Kd') >= 0) && line.indexOf('../materials/') >= 0 && line.indexOf('../materials/textures') < 0) {
+            var _ret = function () {
+              var pMat = _this.mtlLoader.path || '';
+              pMat = pMat.substr(0, pMat.lastIndexOf('meshes'));
+              line = line.replace(/^\s*(map_Kd|map_Ka)\s+\.\.\/materials\/(.+)$/, function (_m, map, fname) {
+                return "".concat(map, " ").concat(pMat, "materials/").concat(fname);
+              });
+              newText += line += '\n';
+              return "continue";
+            }();
+
+            if (_ret === "continue") continue;
           } // Remove ../ from raw files
 
 
@@ -5491,7 +5511,7 @@
     }, {
       key: "onObjLoaded",
       value: function onObjLoaded(_container) {
-        var _this = this;
+        var _this2 = this;
 
         this.container = _container; // Callback when MTL has been loaded
         // Linter doesn't like `that` being used inside a loop, so we move it outside
@@ -5508,10 +5528,10 @@
         if (!this.usingRawFiles) {
           var _loop = function _loop() {
             // Load raw .mtl file
-            var mtlPath = _this.container.materialLibraries[i];
-            fileLoader = new THREE$1.FileLoader(_this.mtlLoader.manager);
-            fileLoader.setPath(_this.mtlLoader.path);
-            fileLoader.setRequestHeader(_this.mtlLoader.requestHeader);
+            var mtlPath = _this2.container.materialLibraries[i];
+            fileLoader = new THREE$1.FileLoader(_this2.mtlLoader.manager);
+            fileLoader.setPath(_this2.mtlLoader.path);
+            fileLoader.setRequestHeader(_this2.mtlLoader.requestHeader);
             fileLoader.load(mtlPath, // onLoad
             function (_text) {
               if (typeof _text === 'string') {
@@ -11644,10 +11664,9 @@
 
             this.scene.loadMeshFromUri(modelUri, submesh, centerSubmesh, // onLoad
             function (mesh) {
-              // Match pending rows on modelUri, not mesh.name: cached Collada clones
-              // keep the asset root name (often "Scene"); only the first-load clone sets name = uri.
+              // Check for the pending meshes.
               for (var i = 0; i < that.pendingMeshes.length; i++) {
-                if (that.pendingMeshes[i].meshUri === modelUri) {
+                if (that.pendingMeshes[i].meshUri === mesh.name) {
                   // No submesh: Load the result.
                   if (!that.pendingMeshes[i].submesh) {
                     loadMesh(mesh, that.pendingMeshes[i].material, that.pendingMeshes[i].parent, ext);
@@ -11663,7 +11682,7 @@
                         } else {
                           // The mesh is already stored in Scene.
                           // The new submesh will be parsed.
-                          that.scene.loadMeshFromUri(modelUri, that.pendingMeshes[i].submesh, that.pendingMeshes[i].centerSubmesh, // on load
+                          that.scene.loadMeshFromUri(mesh.name, that.pendingMeshes[i].submesh, that.pendingMeshes[i].centerSubmesh, // on load
                           function (mesh) {
                             loadMesh(mesh, that.pendingMeshes[i].material, that.pendingMeshes[i].parent, ext);
                           }, // on error
@@ -13233,54 +13252,10 @@
     return Publisher;
   }();
 
-  /** Matches gz-msgs `image.proto` so `CameraSensor.pixel_format` can resolve. */
-
-  var GZ_MSGS_PIXEL_FORMAT_TYPE_ENUM = "enum PixelFormatType {\n  UNKNOWN_PIXEL_FORMAT = 0;\n  L_INT8 = 1;\n  L_INT16 = 2;\n  RGB_INT8 = 3;\n  RGBA_INT8 = 4;\n  BGRA_INT8 = 5;\n  RGB_INT16 = 6;\n  RGB_INT32 = 7;\n  BGR_INT8 = 8;\n  BGR_INT16 = 9;\n  BGR_INT32 = 10;\n  R_FLOAT16 = 11;\n  RGB_FLOAT16 = 12;\n  R_FLOAT32 = 13;\n  RGB_FLOAT32 = 14;\n  BAYER_RGGB8 = 15;\n  BAYER_BGGR8 = 16;\n  BAYER_GBRG8 = 17;\n  BAYER_GRBG8 = 18;\n}";
-
-  function gzMsgsPixelFormatTypeDefined(root) {
-    try {
-      root.lookupEnum('gz.msgs.PixelFormatType');
-      return true;
-    } catch (_a) {
-      return false;
-    }
-  }
-  /**
-   * Parses websocket protobuf definitions. Some gz-launch bundles omit
-   * `image.proto` while `camerasensor.proto` still references `PixelFormatType`;
-   * protobufjs only resolves that at decode time, so we inject the enum when missing.
-   */
-
-
-  function parseWebsocketProtobufDefinitions(protoText) {
-    var parseOnce = function parseOnce(text) {
-      return protobufjs.parse(text, {
-        keepCase: true
-      }).root;
-    };
-
-    var root = parseOnce(protoText);
-
-    if (gzMsgsPixelFormatTypeDefined(root)) {
-      return root;
-    }
-
-    var marker = 'package gz.msgs;';
-    var idx = protoText.indexOf(marker);
-    var augmented = idx === -1 ? "".concat(protoText.replace(/\s*$/, ''), "\n").concat(marker, "\n").concat(GZ_MSGS_PIXEL_FORMAT_TYPE_ENUM, "\n") : "".concat(protoText.slice(0, idx + marker.length), "\n").concat(GZ_MSGS_PIXEL_FORMAT_TYPE_ENUM, "\n").concat(protoText.slice(idx + marker.length));
-    root = parseOnce(augmented);
-
-    if (!gzMsgsPixelFormatTypeDefined(root)) {
-      console.error('gzweb: protobuf definitions still missing gz.msgs.PixelFormatType after augmentation');
-    }
-
-    return root;
-  }
   /**
    * The Transport class is in charge of managing the websocket connection to a
    * Gazebo websocket server.
    */
-
 
   var Transport = /*#__PURE__*/function () {
     function Transport() {
@@ -13670,8 +13645,10 @@
                 break;
 
               default:
-                // Parse the message definitions (with compat for incomplete gz-msgs bundles).
-                _this3.root = parseWebsocketProtobufDefinitions(fileReader.result); // Request topics.
+                // Parse the message definitions.
+                _this3.root = protobufjs.parse(fileReader.result, {
+                  keepCase: true
+                }).root; // Request topics.
 
                 _this3.sendMessage(['topics-types', '', '', '']); // Request world information.
 
@@ -13718,13 +13695,7 @@
           if (frameParts[2] === 'ignition.msgs.Image' || frameParts[2] === 'gazebo.msgs.Image') {
             msg = msgData;
           } else {
-            try {
-              msg = msgType.decode(msgData);
-            } catch (decodeErr) {
-              var message = decodeErr instanceof Error ? decodeErr.message : String(decodeErr);
-              console.warn('Protobuf decode error for', frameParts[2], ':', message);
-              return;
-            }
+            msg = msgType.decode(msgData);
           } // For frame format information see the WebsocketServer documentation at:
           // https://github.com/gazebosim/gz-launch/blob/ign-launch5/plugins/websocket_server/WebsocketServer.hh
 

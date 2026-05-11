@@ -220,7 +220,25 @@ export class GzObjLoader {
         newText += line += '\n';
         continue;
       }
-  
+
+      // Many Fuel models use map_Kd ../materials/foo.png (texture directly under
+      // materials/, not materials/textures/). The generic rewriter below would turn
+      // that into .../materials/textures/../materials/foo.png which resolves to a
+      // duplicate materials/materials/ path and 404s on Fuel.
+      if (!this.usingRawFiles &&
+          (line.indexOf('map_Ka') >= 0 || line.indexOf('map_Kd') >= 0) &&
+          line.indexOf('../materials/') >= 0 &&
+          line.indexOf('../materials/textures') < 0) {
+        let pMat = this.mtlLoader.path || '';
+        pMat = pMat.substr(0, pMat.lastIndexOf('meshes'));
+        line = line.replace(
+          /^\s*(map_Kd|map_Ka)\s+\.\.\/materials\/(.+)$/,
+          (_m, map: string, fname: string) => `${map} ${pMat}materials/${fname}`
+        );
+        newText += line += '\n';
+        continue;
+      }
+
       // Remove ../ from raw files
       if (line.indexOf('../materials/textures') > 0 && this.usingRawFiles) {
         line = line.replace('../', '');
