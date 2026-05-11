@@ -3855,7 +3855,7 @@
             errorText = parserErrorToText(parserError);
           }
 
-          console.error('THREE.ColladaLoader: Failed to parse collada file.\n', errorText);
+          console.debug('THREE.ColladaLoader: Failed to parse collada file.\n', errorText);
           return null;
         } // metadata
 
@@ -11644,9 +11644,10 @@
 
             this.scene.loadMeshFromUri(modelUri, submesh, centerSubmesh, // onLoad
             function (mesh) {
-              // Check for the pending meshes.
+              // Match pending rows on modelUri, not mesh.name: cached Collada clones
+              // keep the asset root name (often "Scene"); only the first-load clone sets name = uri.
               for (var i = 0; i < that.pendingMeshes.length; i++) {
-                if (that.pendingMeshes[i].meshUri === mesh.name) {
+                if (that.pendingMeshes[i].meshUri === modelUri) {
                   // No submesh: Load the result.
                   if (!that.pendingMeshes[i].submesh) {
                     loadMesh(mesh, that.pendingMeshes[i].material, that.pendingMeshes[i].parent, ext);
@@ -11662,7 +11663,7 @@
                         } else {
                           // The mesh is already stored in Scene.
                           // The new submesh will be parsed.
-                          that.scene.loadMeshFromUri(mesh.name, that.pendingMeshes[i].submesh, that.pendingMeshes[i].centerSubmesh, // on load
+                          that.scene.loadMeshFromUri(modelUri, that.pendingMeshes[i].submesh, that.pendingMeshes[i].centerSubmesh, // on load
                           function (mesh) {
                             loadMesh(mesh, that.pendingMeshes[i].material, that.pendingMeshes[i].parent, ext);
                           }, // on error
@@ -13232,10 +13233,54 @@
     return Publisher;
   }();
 
+  /** Matches gz-msgs `image.proto` so `CameraSensor.pixel_format` can resolve. */
+
+  var GZ_MSGS_PIXEL_FORMAT_TYPE_ENUM = "enum PixelFormatType {\n  UNKNOWN_PIXEL_FORMAT = 0;\n  L_INT8 = 1;\n  L_INT16 = 2;\n  RGB_INT8 = 3;\n  RGBA_INT8 = 4;\n  BGRA_INT8 = 5;\n  RGB_INT16 = 6;\n  RGB_INT32 = 7;\n  BGR_INT8 = 8;\n  BGR_INT16 = 9;\n  BGR_INT32 = 10;\n  R_FLOAT16 = 11;\n  RGB_FLOAT16 = 12;\n  R_FLOAT32 = 13;\n  RGB_FLOAT32 = 14;\n  BAYER_RGGB8 = 15;\n  BAYER_BGGR8 = 16;\n  BAYER_GBRG8 = 17;\n  BAYER_GRBG8 = 18;\n}";
+
+  function gzMsgsPixelFormatTypeDefined(root) {
+    try {
+      root.lookupEnum('gz.msgs.PixelFormatType');
+      return true;
+    } catch (_a) {
+      return false;
+    }
+  }
+  /**
+   * Parses websocket protobuf definitions. Some gz-launch bundles omit
+   * `image.proto` while `camerasensor.proto` still references `PixelFormatType`;
+   * protobufjs only resolves that at decode time, so we inject the enum when missing.
+   */
+
+
+  function parseWebsocketProtobufDefinitions(protoText) {
+    var parseOnce = function parseOnce(text) {
+      return protobufjs.parse(text, {
+        keepCase: true
+      }).root;
+    };
+
+    var root = parseOnce(protoText);
+
+    if (gzMsgsPixelFormatTypeDefined(root)) {
+      return root;
+    }
+
+    var marker = 'package gz.msgs;';
+    var idx = protoText.indexOf(marker);
+    var augmented = idx === -1 ? "".concat(protoText.replace(/\s*$/, ''), "\n").concat(marker, "\n").concat(GZ_MSGS_PIXEL_FORMAT_TYPE_ENUM, "\n") : "".concat(protoText.slice(0, idx + marker.length), "\n").concat(GZ_MSGS_PIXEL_FORMAT_TYPE_ENUM, "\n").concat(protoText.slice(idx + marker.length));
+    root = parseOnce(augmented);
+
+    if (!gzMsgsPixelFormatTypeDefined(root)) {
+      console.error('gzweb: protobuf definitions still missing gz.msgs.PixelFormatType after augmentation');
+    }
+
+    return root;
+  }
   /**
    * The Transport class is in charge of managing the websocket connection to a
    * Gazebo websocket server.
    */
+
 
   var Transport = /*#__PURE__*/function () {
     function Transport() {
@@ -13625,10 +13670,8 @@
                 break;
 
               default:
-                // Parse the message definitions.
-                _this3.root = protobufjs.parse(fileReader.result, {
-                  keepCase: true
-                }).root; // Request topics.
+                // Parse the message definitions (with compat for incomplete gz-msgs bundles).
+                _this3.root = parseWebsocketProtobufDefinitions(fileReader.result); // Request topics.
 
                 _this3.sendMessage(['topics-types', '', '', '']); // Request world information.
 
@@ -13675,7 +13718,13 @@
           if (frameParts[2] === 'ignition.msgs.Image' || frameParts[2] === 'gazebo.msgs.Image') {
             msg = msgData;
           } else {
-            msg = msgType.decode(msgData);
+            try {
+              msg = msgType.decode(msgData);
+            } catch (decodeErr) {
+              var message = decodeErr instanceof Error ? decodeErr.message : String(decodeErr);
+              console.warn('Protobuf decode error for', frameParts[2], ':', message);
+              return;
+            }
           } // For frame format information see the WebsocketServer documentation at:
           // https://github.com/gazebosim/gz-launch/blob/ign-launch5/plugins/websocket_server/WebsocketServer.hh
 

@@ -1,5 +1,5 @@
 import * as THREE$1 from 'three';
-import { DataTextureLoader, LinearMipmapLinearFilter, Loader, LoaderUtils, FileLoader, Vector3, Quaternion, Matrix4, MeshBasicMaterial, Scene as Scene$1, TextureLoader, Color as Color$1, MathUtils, AnimationClip, VectorKeyframeTrack, QuaternionKeyframeTrack, MeshLambertMaterial, MeshPhongMaterial, Vector2, DoubleSide, FrontSide, PerspectiveCamera, OrthographicCamera, AmbientLight, SpotLight, PointLight, DirectionalLight, BufferGeometry, Float32BufferAttribute, Skeleton, Bone, Group, LineBasicMaterial, SkinnedMesh, Mesh, Line, LineSegments, LinearEncoding, RGBFormat, RGBAFormat, RepeatWrapping, ClampToEdgeWrapping, CompressedTextureLoader, RGB_ETC1_Format, RGBA_S3TC_DXT5_Format, RGBA_S3TC_DXT3_Format, RGB_S3TC_DXT1_Format, Material as Material$1, PointsMaterial, Points, DefaultLoadingManager, sRGBEncoding, EventDispatcher, MOUSE, TOUCH, Spherical, BufferAttribute, LoadingManager, Box3 } from 'three';
+import { DataTextureLoader, LinearMipmapLinearFilter, Loader, LoaderUtils, FileLoader, Vector3, Quaternion, Matrix4, MeshBasicMaterial, Scene as Scene$1, TextureLoader, Color as Color$1, MathUtils, AnimationClip, VectorKeyframeTrack, QuaternionKeyframeTrack, MeshLambertMaterial, MeshPhongMaterial, Vector2, DoubleSide, FrontSide, PerspectiveCamera, OrthographicCamera, AmbientLight, SpotLight, PointLight, DirectionalLight, BufferGeometry, Float32BufferAttribute, Skeleton, Bone, Group, LineBasicMaterial, SkinnedMesh, Mesh, Line, LineSegments, LinearEncoding, RGBAFormat, RepeatWrapping, ClampToEdgeWrapping, CompressedTextureLoader, RGB_ETC1_Format, RGBA_S3TC_DXT5_Format, RGBA_S3TC_DXT3_Format, RGB_S3TC_DXT1_Format, Material as Material$1, PointsMaterial, Points, DefaultLoadingManager, sRGBEncoding, EventDispatcher, MOUSE, TOUCH, Spherical, BufferAttribute, LoadingManager, Box3 } from 'three';
 import { EventEmitter2 } from 'eventemitter2';
 import * as JSZip from 'jszip';
 import { XMLParser, XMLValidator } from 'fast-xml-parser';
@@ -1470,7 +1470,7 @@ class ColladaLoader extends Loader {
                                         const item = `${savedPath}${image}`;
                                         if (error !== undefined) {
                                             // Mark the texture as error in the loading manager.
-                                            markAssetLoadError(loader.manager, item);
+                                            loader.manager.markAsError(item);
                                             return;
                                         }
                                         // Create the image element
@@ -1488,7 +1488,7 @@ class ColladaLoader extends Loader {
                                         scopeTexture.needsUpdate = true;
                                         scopeTexture.image = imageElem;
                                         // Mark the texture as done in the loading manager.
-                                        markAssetLoadDone(loader.manager, item);
+                                        loader.manager.markAsDone(item);
                                     });
                                 }
                             });
@@ -2998,7 +2998,7 @@ class ColladaLoader extends Loader {
             else {
                 errorText = parserErrorToText(parserError);
             }
-            console.error('THREE.ColladaLoader: Failed to parse collada file.\n', errorText);
+            console.debug('THREE.ColladaLoader: Failed to parse collada file.\n', errorText);
             return null;
         }
         // metadata
@@ -4183,40 +4183,6 @@ class MaterialCreator {
     }
 }
 
-function decodeTextAsset(asset) {
-    if (typeof asset === 'string') {
-        if (asset === AssetError.NOT_FOUND || asset === AssetError.URI_MISSING) {
-            return null;
-        }
-        return asset;
-    }
-    if (asset instanceof ArrayBuffer || ArrayBuffer.isView(asset)) {
-        const text = new TextDecoder().decode(asset);
-        if (text === AssetError.NOT_FOUND || text === AssetError.URI_MISSING) {
-            return null;
-        }
-        return text;
-    }
-    return null;
-}
-function isCompleteColladaText(text) {
-    return /<COLLADA\b/i.test(text) && /<\/COLLADA>\s*$/i.test(text.trimEnd());
-}
-function markAssetLoadDone(manager, url) {
-    if (manager && typeof manager.markAsDone === 'function') {
-        manager.markAsDone(url);
-        return;
-    }
-    manager === null || manager === void 0 ? void 0 : manager.itemEnd(url);
-}
-function markAssetLoadError(manager, url) {
-    if (manager && typeof manager.markAsError === 'function') {
-        manager.markAsError(url);
-        return;
-    }
-    manager === null || manager === void 0 ? void 0 : manager.itemError(url);
-    manager === null || manager === void 0 ? void 0 : manager.itemEnd(url);
-}
 class GzObjLoader {
     /**
      * Load OBJ meshes
@@ -4285,18 +4251,8 @@ class GzObjLoader {
                 // Ignore
             }, function (_error) {
                 // Use the find resource callback to get the mesh
-                that.findResourceCb(that.uri, function (mesh, error) {
-                    if (error !== undefined) {
-                        markAssetLoadError(that.objLoader.manager, that.uri);
-                        return;
-                    }
-                    const text = decodeTextAsset(mesh);
-                    if (text === null) {
-                        console.warn('OBJ WebSocket fallback returned unsupported payload for', that.uri);
-                        markAssetLoadError(that.objLoader.manager, that.uri);
-                        return;
-                    }
-                    that.onObjLoaded(that.objLoader.parse(text));
+                that.findResourceCb(that.uri, function (mesh) {
+                    that.onObjLoaded(that.objLoader.parse(mesh));
                 });
             });
         }
@@ -4403,51 +4359,22 @@ class GzObjLoader {
                 newText += line += '\n';
                 continue;
             }
-            // Lines with a valid materials path: resolve relative refs for HTTP URLs
-            if ((line.indexOf('/materials/textures') > 0 || line.indexOf('../materials/') > 0) && !this.usingRawFiles) {
-                if (this.mtlLoader.path && this.mtlLoader.path.indexOf('http') === 0 &&
-                    line.indexOf('../materials/') > 0) {
-                    var mRoot = this.mtlLoader.path;
-                    if (mRoot.indexOf('/meshes/') > -1) {
-                        mRoot = mRoot.substr(0, mRoot.lastIndexOf('/meshes/') + 1);
-                    }
-                    line = line.replace(/\.\.\/materials\//g, mRoot + 'materials/');
-                }
+            // Skip lines which already have /materials/textures
+            if (line.indexOf('/materials/textures') > 0 && !this.usingRawFiles) {
                 newText += line += '\n';
                 continue;
             }
             // Remove ../ from raw files
-            if ((line.indexOf('../materials/textures') > 0 || line.indexOf('../materials/') > 0) && this.usingRawFiles) {
-                if (this.uri && this.uri.indexOf('http') === 0) {
-                    var meshDir = this.uri.substr(0, this.uri.lastIndexOf('/') + 1);
-                    var modelDir = meshDir.indexOf('/meshes/') > -1
-                        ? meshDir.substr(0, meshDir.lastIndexOf('/meshes/') + 1)
-                        : meshDir;
-                    line = line.replace(/\.\.\/materials\//g, modelDir + 'materials/');
-                } else {
-                    line = line.replace('../', '');
-                }
+            if (line.indexOf('../materials/textures') > 0 && this.usingRawFiles) {
+                line = line.replace('../', '');
                 newText += line += '\n';
                 continue;
             }
-            // Add path to filename.
-            // Bare filenames mean the texture is co-located with the mesh;
-            // only fall back to materials/textures/ for local (non-HTTP) paths.
-            if (this.usingRawFiles && this.uri && this.uri.indexOf('http') === 0) {
-                var meshDirUrl = this.uri.substr(0, this.uri.lastIndexOf('/') + 1);
-                line = line.replace('map_Ka ', 'map_Ka ' + meshDirUrl);
-                line = line.replace('map_Kd ', 'map_Kd ' + meshDirUrl);
-            } else {
-                var p = this.mtlLoader.path || '';
-                if (p.indexOf('http') === 0) {
-                    line = line.replace('map_Ka ', 'map_Ka ' + p);
-                    line = line.replace('map_Kd ', 'map_Kd ' + p);
-                } else {
-                    p = p.substr(0, p.lastIndexOf('meshes'));
-                    line = line.replace('map_Ka ', 'map_Ka ' + p + 'materials/textures/');
-                    line = line.replace('map_Kd ', 'map_Kd ' + p + 'materials/textures/');
-                }
-            }
+            // Add path to filename
+            var p = this.mtlLoader.path || '';
+            p = p.substr(0, p.lastIndexOf('meshes'));
+            line = line.replace('map_Ka ', 'map_Ka ' + p + 'materials/textures/');
+            line = line.replace('map_Kd ', 'map_Kd ' + p + 'materials/textures/');
             newText += line += '\n';
         }
         this.applyMaterial(this.mtlLoader.parse(newText, null));
@@ -6110,9 +6037,6 @@ class Scene {
             // the plane is created on XY plane
             let up = new THREE$1.Vector3(0, 0, 1);
             let material = new THREE$1.MeshPhongMaterial();
-            material.polygonOffset = true;
-            material.polygonOffsetFactor = 1;
-            material.polygonOffsetUnits = 1;
             let mesh = new THREE$1.Mesh(geometry, material);
             // Make sure the normal is normalized.
             normal = normal.normalize();
@@ -6124,30 +6048,6 @@ class Scene {
             mesh.name = 'plane';
             mesh.receiveShadow = true;
             return mesh;
-        };
-        this.followCameraOptions = {
-            mode: 'behind',
-            distanceScale: 1,
-            orbit: null,
-            lerp: 0.1,
-            deadband: 0.002
-        };
-        this.followCameraInitialized = false;
-        this.followCameraMetrics = null;
-        this.followCameraScratch = {
-            rootPosition: new THREE$1.Vector3(),
-            bounds: new THREE$1.Box3(),
-            boundsSize: new THREE$1.Vector3(),
-            boundsCenter: new THREE$1.Vector3(),
-            quaternion: new THREE$1.Quaternion(),
-            center: new THREE$1.Vector3(),
-            smoothedCenter: new THREE$1.Vector3(),
-            forward: new THREE$1.Vector3(),
-            smoothedForward: new THREE$1.Vector3(1, 0, 0),
-            up: new THREE$1.Vector3(0, 0, 1),
-            left: new THREE$1.Vector3(),
-            yawDirection: new THREE$1.Vector3(),
-            targetPosition: new THREE$1.Vector3()
         };
         this.emitter = new EventEmitter2({ verboseMemoryLeak: true });
         this.shaders = config.shaders;
@@ -6178,10 +6078,6 @@ class Scene {
          * The follow entity event name.
          */
         this.followEntityEvent = 'follow_entity';
-        /**
-         * The configure follow camera event name.
-         */
-        this.configureFollowCameraEvent = 'configure_follow_camera';
         /**
          * @member {string} moveToEntity
          * The move to entity event name.
@@ -6217,38 +6113,14 @@ class Scene {
             // Turn off following if `entity` is null.
             if (entityName === undefined || entityName === null) {
                 that.cameraMode = '';
-                that.followCameraInitialized = false;
-                that.followCameraMetrics = null;
                 return;
             }
             var object = that.scene.getObjectByName(entityName);
             if (object !== undefined && object !== null) {
                 // Set the object to track.
                 that.cameraTrackObject = object;
-                that.followCameraInitialized = false;
-                that.followCameraMetrics = null;
                 // Set the camera mode.
                 that.cameraMode = that.followEntityEvent;
-            }
-        });
-        this.emitter.on(this.configureFollowCameraEvent, function (options) {
-            options = options || {};
-            that.followCameraOptions.mode = options.mode || that.followCameraOptions.mode;
-            if (options.distanceScale !== undefined) {
-                that.followCameraOptions.distanceScale = options.distanceScale;
-            }
-            if (options.orbit !== undefined) {
-                that.followCameraOptions.orbit = options.orbit;
-            }
-            if (options.lerp !== undefined) {
-                that.followCameraOptions.lerp = options.lerp;
-            }
-            if (options.deadband !== undefined) {
-                that.followCameraOptions.deadband = options.deadband;
-            }
-            if (options.reset) {
-                that.followCameraInitialized = false;
-                that.followCameraMetrics = null;
             }
         });
         /**
@@ -6655,7 +6527,8 @@ class Scene {
                     this.findResourceCb(cubemap, (material, error) => {
                         if (error !== undefined) {
                             // Mark the texture as error in the loading manager.
-                            markAssetLoadError(this.ddsLoader.manager, cubemap);
+                            const manager = this.ddsLoader.manager;
+                            manager.markAsError(cubemap);
                             return;
                         }
                         // Parse the DDS data.
@@ -6676,7 +6549,8 @@ class Scene {
                         else {
                             console.error('Texture is not a cubemap. Sky will not be set.');
                             // Mark the texture as error in the loading manager.
-                            markAssetLoadError(this.ddsLoader.manager, cubemap);
+                            const manager = this.ddsLoader.manager;
+                            manager.markAsError(cubemap);
                             return;
                         }
                         // Reorder the images to support ThreeJS coordinate system.
@@ -6691,7 +6565,8 @@ class Scene {
                         }
                         this.scene.background.needsUpdate = true;
                         // Mark the texture as done in the loading manager.
-                        markAssetLoadDone(this.ddsLoader.manager, cubemap);
+                        const manager = this.ddsLoader.manager;
+                        manager.markAsDone(cubemap);
                     });
                 }
             });
@@ -7006,119 +6881,12 @@ class Scene {
         this.controls.update();
         // If 'follow' mode, then track the specific object.
         if (this.cameraMode === this.followEntityEvent) {
-            var s = this.followCameraScratch;
-            var options = this.followCameraOptions || {};
-            var alpha = options.lerp !== undefined ? options.lerp : 0.1;
-            var deadband = options.deadband !== undefined ? options.deadband : 0.002;
-            var visualPose = this.cameraTrackObject.userData && this.cameraTrackObject.userData.__followVisualPose;
-            if (visualPose) {
-                if (!visualPose.initialized) {
-                    this.setPose(this.cameraTrackObject, visualPose.targetPosition, visualPose.targetQuaternion);
-                    visualPose.initialized = true;
-                }
-                else {
-                    this.cameraTrackObject.position.lerp(visualPose.targetPosition, alpha);
-                    this.cameraTrackObject.quaternion.slerp(visualPose.targetQuaternion, alpha);
-                }
-                this.cameraTrackObject.matrixWorldNeedsUpdate = true;
-            }
-            if (!this.followCameraMetrics ||
-                this.followCameraMetrics.entityUuid !== this.cameraTrackObject.uuid) {
-                this.cameraTrackObject.getWorldPosition(s.rootPosition);
-                var box = s.bounds.setFromObject(this.cameraTrackObject);
-                var size = s.boundsSize.set(1, 1, 1);
-                var centerZOffset = 0;
-                if (!box.isEmpty()) {
-                    var boxCenter = s.boundsCenter;
-                    box.getCenter(boxCenter);
-                    box.getSize(size);
-                    centerZOffset = boxCenter.z - s.rootPosition.z;
-                }
-                var maxDim = Math.max(size.x, size.y, size.z, 1);
-                var followDistance = Math.max(2.5, maxDim * 2.4);
-                this.followCameraMetrics = {
-                    entityUuid: this.cameraTrackObject.uuid,
-                    centerZOffset: centerZOffset,
-                    distance: followDistance,
-                    height: Math.max(0.8, followDistance * 0.4)
-                };
-            }
-            var metrics = this.followCameraMetrics;
-            var center = s.center;
-            this.cameraTrackObject.getWorldPosition(center);
-            center.z += metrics.centerZOffset;
-            this.cameraTrackObject.getWorldQuaternion(s.quaternion);
-            var forward = s.forward.set(1, 0, 0).applyQuaternion(s.quaternion);
-            forward.z = 0;
-            if (forward.lengthSq() < 1e-6) {
-                forward.set(1, 0, 0);
-            }
-            forward.normalize();
-            var smoothedCenter = s.smoothedCenter;
-            var smoothedForward = s.smoothedForward;
-            if (!this.followCameraInitialized) {
-                smoothedCenter.copy(center);
-                smoothedForward.copy(forward);
-                this.followCameraInitialized = true;
-            }
-            else {
-                if (smoothedCenter.distanceToSquared(center) > deadband * deadband) {
-                    smoothedCenter.lerp(center, alpha);
-                }
-                if (smoothedForward.distanceToSquared(forward) > 1e-6) {
-                    smoothedForward.lerp(forward, alpha).normalize();
-                }
-            }
-            var mode = options.mode || 'behind';
-            var distanceScale = options.distanceScale !== undefined ? options.distanceScale : 1;
-            var orbit = options.orbit || null;
-            var distance = metrics.distance * distanceScale;
-            var height = Math.max(0.8, metrics.height * distanceScale);
-            var up = s.up.set(0, 0, 1);
-            var left = s.left.crossVectors(up, smoothedForward).normalize();
-            var targetPosition = s.targetPosition.copy(smoothedCenter);
-            if (orbit) {
-                var yawDirection = s.yawDirection
-                    .copy(smoothedForward)
-                    .multiplyScalar(Math.cos(orbit.yaw))
-                    .addScaledVector(left, Math.sin(orbit.yaw))
-                    .normalize();
-                targetPosition
-                    .addScaledVector(yawDirection, distance)
-                    .addScaledVector(up, Math.tan(orbit.pitch) * distance);
-            }
-            else {
-                switch (mode) {
-                    case 'front':
-                        targetPosition
-                            .addScaledVector(smoothedForward, distance)
-                            .addScaledVector(up, height);
-                        break;
-                    case 'left':
-                        targetPosition
-                            .addScaledVector(left, distance)
-                            .addScaledVector(up, height * 0.8);
-                        break;
-                    case 'right':
-                        targetPosition
-                            .addScaledVector(left, -distance)
-                            .addScaledVector(up, height * 0.8);
-                        break;
-                    case 'top':
-                        targetPosition.addScaledVector(up, distance * 2.2);
-                        break;
-                    case 'behind':
-                    default:
-                        targetPosition
-                            .addScaledVector(smoothedForward, -distance)
-                            .addScaledVector(up, height);
-                        break;
-                }
-            }
-            this.camera.up.copy(!orbit && mode === 'top' ? smoothedForward : up);
-            this.camera.position.lerp(targetPosition, alpha);
-            this.controls.target.copy(smoothedCenter);
-            this.camera.lookAt(smoothedCenter);
+            // Using a hard-coded offset for now.
+            var relativeCameraOffset = new THREE$1.Vector3(-5, 0, 2);
+            this.cameraTrackObject.updateMatrixWorld();
+            var cameraOffset = relativeCameraOffset.applyMatrix4(this.cameraTrackObject.matrixWorld);
+            this.camera.position.lerp(cameraOffset, 0.1);
+            this.camera.lookAt(this.cameraTrackObject.position);
         }
         else if (this.cameraMode === this.thirdPersonFollowEntityEvent && !this.mousePointerDown) {
             // Based on https://discoverthreejs.com/book/first-steps/transformations/ ,
@@ -7190,37 +6958,6 @@ class Scene {
         {
           this.radialMenu.update();
         }*/
-        // Keep shadow frustums stable; only recenter after the controls target
-        // has moved far enough to avoid follow-camera shadow-map shimmer.
-        if (this.controls) {
-            var _st = this.controls.target;
-            if (!this._shadowTmpV) this._shadowTmpV = new THREE$1.Vector3();
-            if (!this._shadowTargetAnchor) this._shadowTargetAnchor = new THREE$1.Vector3(_st.x, _st.y, _st.z);
-            if (this._shadowTargetAnchor.distanceToSquared(_st) > 16) this._shadowTargetAnchor.copy(_st);
-            _st = this._shadowTargetAnchor;
-            var _tmpV = this._shadowTmpV;
-            this.scene.traverse(function (child) {
-                if (child.isDirectionalLight && child.castShadow &&
-                    child.userData.shadowDirection) {
-                    var sd = child.userData.shadowDirection;
-                    var len = Math.sqrt(sd.x*sd.x + sd.y*sd.y + sd.z*sd.z) || 1;
-                    var nx = sd.x/len, ny = sd.y/len, nz = sd.z/len;
-                    var dist = 110;
-                    // Desired world pos: orbit target shifted opposite to light direction
-                    var wx = _st.x - nx * dist;
-                    var wy = _st.y - ny * dist;
-                    var wz = _st.z - nz * dist;
-                    // Convert to local space of the light's parent
-                    if (child.parent) {
-                        child.parent.getWorldPosition(_tmpV);
-                        wx -= _tmpV.x; wy -= _tmpV.y; wz -= _tmpV.z;
-                    }
-                    child.position.set(wx, wy, wz);
-                    // Target stays relative to light (direction unchanged)
-                    child.target.updateMatrixWorld();
-                }
-            });
-        }
         this.renderer.clear();
         this.renderer.render(this.scene, this.camera);
         this.renderer.clearDepth();
@@ -7454,8 +7191,8 @@ class Scene {
         if (distance) {
             lightObj.distance = distance;
         }
-        if (cast_shadows !== undefined && cast_shadows !== null) {
-            lightObj.castShadow = !!cast_shadows;
+        if (cast_shadows) {
+            lightObj.castShadow = cast_shadows;
         }
         return lightObj;
     }
@@ -7484,7 +7221,9 @@ class Scene {
         if (falloff !== null) {
             lightObj.decay = falloff;
         }
-        lightObj.castShadow = cast_shadows !== undefined ? !!cast_shadows : true;
+        if (cast_shadows) {
+            lightObj.castShadow = cast_shadows;
+        }
         // Set the target
         let dir = new THREE$1.Vector3(0, 0, -1);
         if (direction) {
@@ -7513,19 +7252,17 @@ class Scene {
         }
         var lightObj = new THREE$1.DirectionalLight(color, intensity);
         lightObj.shadow.camera.near = 1;
-        lightObj.shadow.camera.far = 220;
-        lightObj.shadow.mapSize.width = 8192;
-        lightObj.shadow.mapSize.height = 8192;
-        lightObj.shadow.camera.left = -32;
-        lightObj.shadow.camera.bottom = -32;
-        lightObj.shadow.camera.right = 32;
-        lightObj.shadow.camera.top = 32;
+        lightObj.shadow.camera.far = 50;
+        lightObj.shadow.mapSize.width = 4094;
+        lightObj.shadow.mapSize.height = 4094;
+        lightObj.shadow.camera.bottom = -100;
+        lightObj.shadow.camera.right = 100;
+        lightObj.shadow.camera.top = 100;
         lightObj.shadow.bias = 0.0001;
-        lightObj.shadow.normalBias = 0.05;
-        lightObj.shadow.radius = 15;
-        lightObj.shadow.camera.updateProjectionMatrix();
-        lightObj.position.set(0, 0, 100);
-        lightObj.castShadow = cast_shadows !== undefined ? !!cast_shadows : true;
+        lightObj.position.set(0, 0, 0);
+        if (cast_shadows) {
+            lightObj.castShadow = cast_shadows;
+        }
         // Set the target
         let dir = new THREE$1.Vector3(0, 0, -1);
         if (direction) {
@@ -7533,8 +7270,6 @@ class Scene {
             dir.y = direction.y;
             dir.z = direction.z;
         }
-        // Store direction for dynamic shadow camera repositioning
-        lightObj.userData.shadowDirection = dir.clone();
         let targetObj = new THREE$1.Object3D();
         lightObj.add(targetObj);
         targetObj.position.copy(dir);
@@ -7792,26 +7527,14 @@ class Scene {
                     this.findResourceCb(uri, (mesh, error) => {
                         if (error !== undefined) {
                             // Mark the mesh as error in the loading manager.
-                            markAssetLoadError(this.colladaLoader.manager, uri);
+                            const manager = this.colladaLoader.manager;
+                            manager.markAsError(uri);
                             return;
                         }
-                        const text = decodeTextAsset(mesh);
-                        if (text === null) {
-                            console.warn('Collada WebSocket fallback returned unsupported payload for', uri);
-                            markAssetLoadError(this.colladaLoader.manager, uri);
-                            return;
-                        }
-                        if (!isCompleteColladaText(text)) {
-                            console.warn('Collada WebSocket fallback returned incomplete COLLADA XML for', uri, {
-                                chars: text.length,
-                                hasClosingTag: /<\/COLLADA>/i.test(text)
-                            });
-                            markAssetLoadError(this.colladaLoader.manager, uri);
-                            return;
-                        }
-                        meshReady(this.colladaLoader.parse(text, uri));
+                        meshReady(this.colladaLoader.parse(new TextDecoder().decode(mesh), uri));
                         // Mark the mesh as done in the loading manager.
-                        markAssetLoadDone(this.colladaLoader.manager, uri);
+                        const manager = this.colladaLoader.manager;
+                        manager.markAsDone(uri);
                     });
                 }
             });
@@ -7979,31 +7702,14 @@ class Scene {
                 that.findResourceCb(uri, (mesh, error) => {
                     if (error !== undefined) {
                         // Mark the mesh as error in the loading manager.
-                        markAssetLoadError(that.stlLoader.manager, uri);
+                        const manager = that.stlLoader.manager;
+                        manager.markAsError(uri);
                         return;
                     }
-                    try {
-                        // STLLoader.parse expects raw bytes and returns geometry;
-                        // keep the same Mesh-shaped contract as the HTTP loader path.
-                        var buf = (mesh instanceof ArrayBuffer) ? mesh
-                            : (mesh.buffer
-                                ? mesh.buffer.slice(mesh.byteOffset, mesh.byteOffset + mesh.byteLength)
-                                : new Uint8Array(mesh).buffer);
-                        var geometry = that.stlLoader.parse(buf);
-                        var stlMesh = new THREE$1.Mesh(geometry);
-                        stlMesh.castShadow = true;
-                        stlMesh.receiveShadow = true;
-                        that.meshes.set(uri, stlMesh);
-                        stlMesh = stlMesh.clone();
-                        stlMesh.name = uri;
-                        onLoad(stlMesh);
-                    } catch (parseErr) {
-                        console.error('STL WebSocket fallback parse error for', uri, ':', parseErr.message);
-                        markAssetLoadError(that.stlLoader.manager, uri);
-                        return;
-                    }
+                    onLoad(that.stlLoader.parse(new TextDecoder().decode(mesh)));
                     // Mark the mesh as done in the loading manager.
-                    markAssetLoadDone(that.stlLoader.manager, uri);
+                    const manager = that.stlLoader.manager;
+                    manager.markAsDone(uri);
                 });
             }
         });
@@ -8448,7 +8154,7 @@ class Scene {
         var modelRotation = new THREE$1.Matrix4();
         modelRotation.extractRotation(model.matrixWorld);
         var modelInverse = new THREE$1.Matrix4();
-        modelInverse.copy(modelRotation).invert();
+        modelInverse.getInverse(modelRotation);
         this.boundingBox.quaternion.setFromRotationMatrix(modelInverse);
         this.boundingBox.name = 'boundingBox';
         this.boundingBox.visible = true;
@@ -9418,7 +9124,8 @@ class Scene {
                 this.findResourceCb(map, (image, error) => {
                     if (error !== undefined) {
                         // Mark the texture as error in the loading manager.
-                        markAssetLoadError(this.textureLoader.manager, map);
+                        const manager = this.textureLoader.manager;
+                        manager.markAsError(map);
                         return;
                     }
                     // Create the image element
@@ -9437,7 +9144,8 @@ class Scene {
                     texture.needsUpdate = true;
                     texture.image = imageElem;
                     // Mark the texture as done in the loading manager.
-                    markAssetLoadDone(this.textureLoader.manager, map);
+                    const manager = this.textureLoader.manager;
+                    manager.markAsDone(map);
                 });
             }
         };
@@ -10285,22 +9993,10 @@ class SDFParser {
                         if (this.scene.meshes.has(modelUri)) {
                             let mesh = this.scene.meshes.get(modelUri);
                             if (parent.getObjectByName(mesh.name) === undefined) {
-                                mesh = mesh.clone(true);
-                                mesh.traverse(function (child) {
-                                    if (child instanceof THREE$1.Mesh && child.material) {
-                                        if (Array.isArray(child.material)) {
-                                            child.material = child.material.map(function (material) {
-                                                return material.clone();
-                                            });
-                                        }
-                                        else {
-                                            child.material = child.material.clone();
-                                        }
-                                    }
-                                });
-                                if (!submesh || this.scene.useSubMesh(mesh, submesh, centerSubmesh)) {
-                                    loadMesh(mesh, material, parent, ext);
-                                }
+                                mesh = mesh.clone();
+                                this.scene.useSubMesh(mesh, submesh, centerSubmesh);
+                                parent.add(mesh);
+                                loadGeom(parent);
                             }
                         }
                         return;
@@ -10318,25 +10014,38 @@ class SDFParser {
                 this.scene.loadMeshFromUri(modelUri, submesh, centerSubmesh, 
                 // onLoad
                 function (mesh) {
-                    // Check for the pending meshes.
+                    // Match pending rows on modelUri, not mesh.name: cached Collada clones
+                    // keep the asset root name (often "Scene"); only the first-load clone sets name = uri.
                     for (var i = 0; i < that.pendingMeshes.length; i++) {
-                        if (that.pendingMeshes[i].meshUri === mesh.name) {
+                        if (that.pendingMeshes[i].meshUri === modelUri) {
                             // No submesh: Load the result.
                             if (!that.pendingMeshes[i].submesh) {
                                 loadMesh(mesh, that.pendingMeshes[i].material, that.pendingMeshes[i].parent, ext);
                             }
                             else {
-                                // Delegate submesh extraction to loadMeshFromUri
-                                // which correctly clones, filters via useSubMesh,
-                                // and only calls onLoad when the submesh is found.
-                                var pendingEntry = that.pendingMeshes[i];
-                                that.scene.loadMeshFromUri(mesh.name, pendingEntry.submesh, pendingEntry.centerSubmesh,
-                                function (submeshResult) {
-                                    loadMesh(submeshResult, pendingEntry.material, pendingEntry.parent, ext);
-                                },
-                                function (error) {
-                                    console.error('Mesh loading error', error);
-                                });
+                                // Check if the mesh belongs to a submesh.
+                                let allChildren = [];
+                                getDescendants(mesh, allChildren);
+                                for (var c = 0; c < allChildren.length; ++c) {
+                                    if (allChildren[c] instanceof THREE$1.Mesh) {
+                                        if (allChildren[c].name === that.pendingMeshes[i].submesh) {
+                                            loadMesh(mesh, that.pendingMeshes[i].material, that.pendingMeshes[i].parent, ext);
+                                        }
+                                        else {
+                                            // The mesh is already stored in Scene.
+                                            // The new submesh will be parsed.
+                                            that.scene.loadMeshFromUri(modelUri, that.pendingMeshes[i].submesh, that.pendingMeshes[i].centerSubmesh, 
+                                            // on load
+                                            function (mesh) {
+                                                loadMesh(mesh, that.pendingMeshes[i].material, that.pendingMeshes[i].parent, ext);
+                                            }, 
+                                            // on error
+                                            function (error) {
+                                                console.error('Mesh loading error', error);
+                                            });
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -10407,23 +10116,9 @@ class SDFParser {
         function loadGeom(visualObj) {
             let allChildren = [];
             getDescendants(visualObj, allChildren);
-            var toRemove = [];
             for (var c = 0; c < allChildren.length; ++c) {
                 if (allChildren[c] instanceof THREE$1.Mesh) {
-                    var mName = (allChildren[c].name || '').toLowerCase();
-                    if (mName === 'ground_out') {
-                        toRemove.push(allChildren[c]);
-                        continue;
-                    }
-                    var isGround = mName === 'ground' || mName === 'ground_plane' || mName === 'plane';
-                    var isEnclosure = mName === 'roof' || mName.indexOf('wall') === 0;
-                    if (isGround && allChildren[c].material) {
-                        allChildren[c].material.polygonOffset = true;
-                        allChildren[c].material.polygonOffsetFactor = 4;
-                        allChildren[c].material.polygonOffsetUnits = 4;
-                        allChildren[c].renderOrder = -1;
-                    }
-                    allChildren[c].castShadow = !(isGround || isEnclosure);
+                    allChildren[c].castShadow = true;
                     allChildren[c].receiveShadow = true;
                     if (visualObj.castShadow) {
                         allChildren[c].castShadow = visualObj.castShadow;
@@ -10437,20 +10132,6 @@ class SDFParser {
                         allChildren[c].visible = that.scene.showCollisions;
                     }
                 }
-            }
-            for (var r = 0; r < toRemove.length; ++r) {
-                try {
-                    if (toRemove[r].parent) toRemove[r].parent.remove(toRemove[r]);
-                    if (toRemove[r].geometry) toRemove[r].geometry.dispose();
-                    var mats = toRemove[r].material;
-                    if (mats) {
-                        if (!Array.isArray(mats)) mats = [mats];
-                        for (var m = 0; m < mats.length; ++m) {
-                            if (mats[m].map) mats[m].map.dispose();
-                            mats[m].dispose();
-                        }
-                    }
-                } catch (e) { /* best-effort cleanup */ }
             }
         }
     }
@@ -11691,6 +11372,59 @@ class Publisher {
     }
 }
 
+/** Matches gz-msgs `image.proto` so `CameraSensor.pixel_format` can resolve. */
+const GZ_MSGS_PIXEL_FORMAT_TYPE_ENUM = `enum PixelFormatType {
+  UNKNOWN_PIXEL_FORMAT = 0;
+  L_INT8 = 1;
+  L_INT16 = 2;
+  RGB_INT8 = 3;
+  RGBA_INT8 = 4;
+  BGRA_INT8 = 5;
+  RGB_INT16 = 6;
+  RGB_INT32 = 7;
+  BGR_INT8 = 8;
+  BGR_INT16 = 9;
+  BGR_INT32 = 10;
+  R_FLOAT16 = 11;
+  RGB_FLOAT16 = 12;
+  R_FLOAT32 = 13;
+  RGB_FLOAT32 = 14;
+  BAYER_RGGB8 = 15;
+  BAYER_BGGR8 = 16;
+  BAYER_GBRG8 = 17;
+  BAYER_GRBG8 = 18;
+}`;
+function gzMsgsPixelFormatTypeDefined(root) {
+    try {
+        root.lookupEnum('gz.msgs.PixelFormatType');
+        return true;
+    }
+    catch (_a) {
+        return false;
+    }
+}
+/**
+ * Parses websocket protobuf definitions. Some gz-launch bundles omit
+ * `image.proto` while `camerasensor.proto` still references `PixelFormatType`;
+ * protobufjs only resolves that at decode time, so we inject the enum when missing.
+ */
+function parseWebsocketProtobufDefinitions(protoText) {
+    const parseOnce = (text) => parse(text, { keepCase: true }).root;
+    let root = parseOnce(protoText);
+    if (gzMsgsPixelFormatTypeDefined(root)) {
+        return root;
+    }
+    const marker = 'package gz.msgs;';
+    const idx = protoText.indexOf(marker);
+    const augmented = idx === -1
+        ? `${protoText.replace(/\s*$/, '')}\n${marker}\n${GZ_MSGS_PIXEL_FORMAT_TYPE_ENUM}\n`
+        : `${protoText.slice(0, idx + marker.length)}\n${GZ_MSGS_PIXEL_FORMAT_TYPE_ENUM}\n${protoText.slice(idx + marker.length)}`;
+    root = parseOnce(augmented);
+    if (!gzMsgsPixelFormatTypeDefined(root)) {
+        console.error('gzweb: protobuf definitions still missing gz.msgs.PixelFormatType after augmentation');
+    }
+    return root;
+}
 /**
  * The Transport class is in charge of managing the websocket connection to a
  * Gazebo websocket server.
@@ -11825,8 +11559,8 @@ class Transport {
     subscribe(topic) {
         this.topicMap.set(topic.name, topic);
         const publisher = this.availableTopics.filter(pub => pub['topic'] === topic.name)[0];
-        if (publisher && (publisher['msg_type'] === 'ignition.msgs.Image' ||
-            publisher['msg_type'] === 'gazebo.msgs.Image')) {
+        if (publisher['msg_type'] === 'ignition.msgs.Image' ||
+            publisher['msg_type'] === 'gazebo.msgs.Image') {
             this.sendMessage(['image', topic.name, '', '']);
         }
         else {
@@ -11988,14 +11722,8 @@ class Transport {
                         console.error('Invalid key');
                         break;
                     default:
-                        // Parse the message definitions. Prepend any missing enum/message
-                        // stubs that newer gz-msgs versions reference but the WebSocket
-                        // server's proto bundle may omit.
-                        var protoDefs = fileReader.result;
-                        if (protoDefs.indexOf('enum PixelFormatType') === -1) {
-                            protoDefs = protoDefs.replace(/(package\s+gz\.msgs\s*;)/, '$1\nenum PixelFormatType { UNKNOWN_PIXEL_FORMAT = 0; L_INT8 = 1; L_INT16 = 2; RGB_INT8 = 3; RGBA_INT8 = 4; BGRA_INT8 = 5; RGB_INT16 = 6; RGB_INT32 = 7; BGR_INT8 = 8; BGR_INT16 = 9; BGR_INT32 = 10; R_FLOAT16 = 11; RGB_FLOAT16 = 12; R_FLOAT32 = 13; RGB_FLOAT32 = 14; BAYER_RGGB8 = 15; BAYER_BGGR8 = 16; BAYER_GBRG8 = 17; BAYER_GRBG8 = 18; }');
-                        }
-                        this.root = parse(protoDefs, { keepCase: true }).root;
+                        // Parse the message definitions (with compat for incomplete gz-msgs bundles).
+                        this.root = parseWebsocketProtobufDefinitions(fileReader.result);
                         // Request topics.
                         this.sendMessage(['topics-types', '', '', '']);
                         // Request world information.
@@ -12036,8 +11764,10 @@ class Transport {
             else {
                 try {
                     msg = msgType.decode(msgData);
-                } catch (decodeErr) {
-                    console.warn('Protobuf decode error for', frameParts[2], ':', decodeErr.message);
+                }
+                catch (decodeErr) {
+                    const message = decodeErr instanceof Error ? decodeErr.message : String(decodeErr);
+                    console.warn('Protobuf decode error for', frameParts[2], ':', message);
                     return;
                 }
             }
@@ -12169,11 +11899,6 @@ class SceneManager {
          */
         this.models = [];
         /**
-         * Fast lookup and dedupe state for scene/info model updates.
-         */
-        this.modelIndexByName = new Map();
-        this.sceneInfoSignature = '';
-        /**
          * A Transport interface used to connect to a Gazebo server.
          */
         this.transport = new Transport();
@@ -12257,11 +11982,6 @@ class SceneManager {
     follow(entityName) {
         if (this.scene) {
             this.scene.emitter.emit('follow_entity', entityName);
-        }
-    }
-    configureFollowCamera(options) {
-        if (this.scene) {
-            this.scene.emitter.emit('configure_follow_camera', options);
         }
     }
     thirdPersonFollow(entityName) {
@@ -12376,26 +12096,15 @@ class SceneManager {
             }
             this.sceneInfo = sceneInfo;
             this.startVisualization();
-            const initialModels = sceneInfo['model'] || [];
-            initialModels.forEach((model) => {
+            sceneInfo['model'].forEach((model) => {
                 const modelObj = this.sdfParser.spawnFromObj({ model }, { enableLights: this.enableLights });
-                if (!modelObj) {
-                    return;
-                }
                 model['gz3dName'] = modelObj.name;
                 this.models.push(model);
-                if (model['name']) {
-                    this.modelIndexByName.set(model['name'], this.models.length - 1);
-                }
                 this.scene.add(modelObj);
             });
-            this.sceneInfoSignature = this.sceneInfoModelSignature(initialModels);
-            const initialLights = sceneInfo['light'] || [];
-            initialLights.forEach((light) => {
+            sceneInfo['light'].forEach((light) => {
                 const lightObj = this.sdfParser.spawnLight(light);
-                if (lightObj) {
-                    this.scene.add(lightObj);
-                }
+                this.scene.add(lightObj);
             });
             // Set the ambient color, if present
             if (sceneInfo['ambient'] !== undefined &&
@@ -12462,28 +12171,7 @@ class SceneManager {
                 // name plus the id.
                 const entity = this.scene.getByName(entityName);
                 if (entity) {
-                    const isFollowedEntity = this.scene.cameraMode === this.scene.followEntityEvent &&
-                        this.scene.cameraTrackObject === entity;
-                    if (isFollowedEntity) {
-                        const userData = entity.userData || (entity.userData = {});
-                        const visualPose = userData.__followVisualPose || (userData.__followVisualPose = {
-                            targetPosition: new THREE$1.Vector3(),
-                            targetQuaternion: new THREE$1.Quaternion(),
-                            initialized: false
-                        });
-                        visualPose.targetPosition.copy(pose.position);
-                        visualPose.targetQuaternion.copy(pose.orientation);
-                        if (!visualPose.initialized) {
-                            this.scene.setPose(entity, pose.position, pose.orientation);
-                            visualPose.initialized = true;
-                        }
-                    }
-                    else {
-                        if (entity.userData && entity.userData.__followVisualPose) {
-                            delete entity.userData.__followVisualPose;
-                        }
-                        this.scene.setPose(entity, pose.position, pose.orientation);
-                    }
+                    this.scene.setPose(entity, pose.position, pose.orientation);
                 }
                 else {
                     console.warn('Unable to find entity with name ', entityName, entity);
@@ -12497,42 +12185,25 @@ class SceneManager {
         }
         // Subscribe to the 'scene/info' topic which sends scene changes.
         const sceneTopic = new Topic(`/world/${this.transport.getWorld()}/scene/info`, (sceneInfo) => {
-            if (!sceneInfo || !this.scene || !this.sdfParser) {
+            if (!sceneInfo) {
                 return;
             }
             // Process each model in the scene.
-            const models = sceneInfo['model'] || [];
-            const signature = this.sceneInfoModelSignature(models);
-            if (signature === this.sceneInfoSignature) {
-                return;
-            }
-            this.sceneInfoSignature = signature;
-            models.forEach((model) => {
-                if (!model || !model['name']) {
-                    return;
-                }
+            sceneInfo['model'].forEach((model) => {
                 // Check to see if the model already exists in the scene. This
                 // could happen when a simulation level is loaded multiple times.
                 let foundIndex = this.getModelIndex(model['name']);
-                // If the model was not found, add it without reconnecting the
-                // whole renderer. Otherwise update IDs so future pose messages
-                // continue targeting the existing object.
+                // If the model was not found, then add the new model. Otherwise
+                // update the models ID.
                 if (foundIndex < 0) {
                     const modelObj = this.sdfParser.spawnFromObj({ model }, { enableLights: this.enableLights });
-                    if (modelObj) {
-                        model['gz3dName'] = modelObj.name;
-                        this.models.push(model);
-                        this.modelIndexByName.set(model['name'], this.models.length - 1);
-                        this.scene.add(modelObj);
-                    }
+                    this.models.push(model);
+                    this.scene.add(modelObj);
                 }
                 else {
                     // Make sure to update the exisiting models so that future pose
                     // messages can update the model.
                     this.models[foundIndex]['id'] = model['id'];
-                    if (model['gz3dName'] !== undefined) {
-                        this.models[foundIndex]['gz3dName'] = model['gz3dName'];
-                    }
                 }
             });
         });
@@ -12541,26 +12212,18 @@ class SceneManager {
     /**
      * Get the index into the model array of a model based on a name
      */
-    sceneInfoModelSignature(models) {
-        return models.map((model) => `${model && model['name'] || ''}:${model && model['id'] || ''}`).join('|');
-    }
     getModelIndex(name) {
-        const cachedIndex = this.modelIndexByName.get(name);
-        if (cachedIndex !== undefined &&
-            this.models[cachedIndex] &&
-            this.models[cachedIndex]['name'] === name) {
-            return cachedIndex;
-        }
+        let foundIndex = -1;
         for (let i = 0; i < this.models.length; ++i) {
             // Simulation enforces unique names between models. The ID
             // of a model may change. This occurs when levels are loaded,
             // unloaded, and then reloaded.
             if (this.models[i]['name'] === name) {
-                this.modelIndexByName.set(name, i);
-                return i;
+                foundIndex = i;
+                break;
             }
         }
-        return -1;
+        return foundIndex;
     }
     /**
      * Setup the visualization scene.

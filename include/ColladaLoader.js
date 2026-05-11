@@ -4161,7 +4161,7 @@ class ColladaLoader extends Loader {
 
 			}
 
-			console.error( 'THREE.ColladaLoader: Failed to parse collada file.\n', errorText );
+			console.debug( 'THREE.ColladaLoader: Failed to parse collada file.\n', errorText );
 
 			return null;
 
