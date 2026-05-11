@@ -215,25 +215,54 @@ export class GzObjLoader {
         continue;
       }
   
-      // Skip lines which already have /materials/textures
-      if (line.indexOf('/materials/textures') > 0 && !this.usingRawFiles) {
+      // Lines with a valid materials path: resolve relative refs for HTTP URLs.
+      if ((line.indexOf('/materials/textures') > 0 ||
+          line.indexOf('../materials/') > 0) && !this.usingRawFiles) {
+        if (this.mtlLoader.path && this.mtlLoader.path.indexOf('http') === 0 &&
+            line.indexOf('../materials/') > 0) {
+          var mRoot = this.mtlLoader.path;
+          if (mRoot.indexOf('/meshes/') > -1) {
+            mRoot = mRoot.substr(0, mRoot.lastIndexOf('/meshes/') + 1);
+          }
+          line = line.replace(/\.\.\/materials\//g, mRoot + 'materials/');
+        }
         newText += line += '\n';
         continue;
       }
-  
-      // Remove ../ from raw files
-      if (line.indexOf('../materials/textures') > 0 && this.usingRawFiles) {
-        line = line.replace('../', '');
+
+      // Remove ../ from raw files, preserving absolute HTTP model paths.
+      if ((line.indexOf('../materials/textures') > 0 ||
+          line.indexOf('../materials/') > 0) && this.usingRawFiles) {
+        if (this.uri && this.uri.indexOf('http') === 0) {
+          var meshDir = this.uri.substr(0, this.uri.lastIndexOf('/') + 1);
+          var modelDir = meshDir.indexOf('/meshes/') > -1
+            ? meshDir.substr(0, meshDir.lastIndexOf('/meshes/') + 1)
+            : meshDir;
+          line = line.replace(/\.\.\/materials\//g, modelDir + 'materials/');
+        } else {
+          line = line.replace('../', '');
+        }
         newText += line += '\n';
         continue;
       }
-  
-      // Add path to filename
-      var p = this.mtlLoader.path || '';
-      p = p.substr(0, p.lastIndexOf('meshes'));
-  
-      line = line.replace('map_Ka ', 'map_Ka ' + p + 'materials/textures/');
-      line = line.replace('map_Kd ', 'map_Kd ' + p + 'materials/textures/');
+
+      // Bare filenames are co-located with the mesh for HTTP assets; local
+      // model files keep gzweb's historical materials/textures fallback.
+      if (this.usingRawFiles && this.uri && this.uri.indexOf('http') === 0) {
+        var meshDirUrl = this.uri.substr(0, this.uri.lastIndexOf('/') + 1);
+        line = line.replace('map_Ka ', 'map_Ka ' + meshDirUrl);
+        line = line.replace('map_Kd ', 'map_Kd ' + meshDirUrl);
+      } else {
+        var p = this.mtlLoader.path || '';
+        if (p.indexOf('http') === 0) {
+          line = line.replace('map_Ka ', 'map_Ka ' + p);
+          line = line.replace('map_Kd ', 'map_Kd ' + p);
+        } else {
+          p = p.substr(0, p.lastIndexOf('meshes'));
+          line = line.replace('map_Ka ', 'map_Ka ' + p + 'materials/textures/');
+          line = line.replace('map_Kd ', 'map_Kd ' + p + 'materials/textures/');
+        }
+      }
   
       newText += line += '\n';
     }

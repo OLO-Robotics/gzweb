@@ -1035,31 +1035,69 @@ export class SDFParser {
     function loadGeom(visualObj: THREE.Object3D) {
       let allChildren: THREE.Object3D[] = [];
       getDescendants(visualObj, allChildren);
+      var toRemove: THREE.Mesh[] = [];
       for (var c = 0; c < allChildren.length; ++c)
       {
         if (allChildren[c] instanceof THREE.Mesh)
         {
-          allChildren[c].castShadow = true;
-          allChildren[c].receiveShadow = true;
+          const mesh = allChildren[c] as THREE.Mesh;
+          var mName = (mesh.name || '').toLowerCase();
+          if (mName === 'ground_out') {
+            toRemove.push(mesh);
+            continue;
+          }
+          var isGround = mName === 'ground' || mName === 'ground_plane' ||
+            mName === 'plane';
+          var isEnclosure = mName === 'roof' || mName.indexOf('wall') === 0;
+          if (isGround && mesh.material) {
+            if (Array.isArray(mesh.material)) {
+              mesh.material.forEach((material) => {
+                material.polygonOffset = true;
+                material.polygonOffsetFactor = 4;
+                material.polygonOffsetUnits = 4;
+              });
+            } else {
+              mesh.material.polygonOffset = true;
+              mesh.material.polygonOffsetFactor = 4;
+              mesh.material.polygonOffsetUnits = 4;
+            }
+            mesh.renderOrder = -1;
+          }
+          mesh.castShadow = !(isGround || isEnclosure);
+          mesh.receiveShadow = true;
 
           if (visualObj.castShadow)
           {
-            allChildren[c].castShadow = visualObj.castShadow;
+            mesh.castShadow = visualObj.castShadow;
           }
           if (visualObj.receiveShadow)
           {
-            allChildren[c].receiveShadow = visualObj.receiveShadow;
+            mesh.receiveShadow = visualObj.receiveShadow;
           }
 
           if (visualObj.name.indexOf('COLLISION_VISUAL') >= 0)
           {
-            allChildren[c].castShadow = false;
-            allChildren[c].receiveShadow = false;
+            mesh.castShadow = false;
+            mesh.receiveShadow = false;
 
-            allChildren[c].visible = that.scene.showCollisions;
+            mesh.visible = that.scene.showCollisions;
           }
-          break;
         }
+      }
+      for (var r = 0; r < toRemove.length; ++r) {
+        try {
+          if (toRemove[r].parent) toRemove[r].parent!.remove(toRemove[r]);
+          if (toRemove[r].geometry) toRemove[r].geometry.dispose();
+          var mats = toRemove[r].material;
+          if (mats) {
+            const materials = Array.isArray(mats) ? mats : [mats];
+            for (var m = 0; m < materials.length; ++m) {
+              const textureMap = (materials[m] as any).map;
+              if (textureMap) textureMap.dispose();
+              materials[m].dispose();
+            }
+          }
+        } catch (e) { /* best-effort cleanup */ }
       }
     }
   }

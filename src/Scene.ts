@@ -92,6 +92,8 @@ export class Scene {
   private cameraSlerpEnd: THREE.Quaternion;
   private cameraLerpStart: THREE.Vector3;
   private cameraLerpEnd: THREE.Vector3;
+  private shadowTmpV?: THREE.Vector3;
+  private shadowTargetAnchor?: THREE.Vector3;
 
   // Object the camera should track.
   private cameraTrackObject: THREE.Object3D;
@@ -1266,6 +1268,55 @@ export class Scene {
       this.radialMenu.update();
     }*/
 
+    // Keep shadow frustums stable; only recenter after the controls target
+    // has moved far enough to avoid follow-camera shadow-map shimmer.
+    if (this.controls) {
+      var shadowTarget = this.controls.target;
+      if (!this.shadowTmpV) this.shadowTmpV = new THREE.Vector3();
+      if (!this.shadowTargetAnchor) {
+        this.shadowTargetAnchor = new THREE.Vector3(
+          shadowTarget.x,
+          shadowTarget.y,
+          shadowTarget.z,
+        );
+      }
+      if (this.shadowTargetAnchor.distanceToSquared(shadowTarget) > 16) {
+        this.shadowTargetAnchor.copy(shadowTarget);
+      }
+      shadowTarget = this.shadowTargetAnchor;
+      var tmpV = this.shadowTmpV;
+
+      this.scene.traverse(function(child) {
+        const directionalLight = child as THREE.DirectionalLight;
+        const shadowDirection = directionalLight.userData.shadowDirection;
+        if ((directionalLight as any).isDirectionalLight &&
+            directionalLight.castShadow && shadowDirection) {
+          var len = Math.sqrt(
+            shadowDirection.x * shadowDirection.x +
+            shadowDirection.y * shadowDirection.y +
+            shadowDirection.z * shadowDirection.z,
+          ) || 1;
+          var nx = shadowDirection.x / len;
+          var ny = shadowDirection.y / len;
+          var nz = shadowDirection.z / len;
+          var dist = 110;
+          var wx = shadowTarget.x - nx * dist;
+          var wy = shadowTarget.y - ny * dist;
+          var wz = shadowTarget.z - nz * dist;
+
+          if (directionalLight.parent) {
+            directionalLight.parent.getWorldPosition(tmpV);
+            wx -= tmpV.x;
+            wy -= tmpV.y;
+            wz -= tmpV.z;
+          }
+
+          directionalLight.position.set(wx, wy, wz);
+          directionalLight.target.updateMatrixWorld();
+        }
+      });
+    }
+
     this.renderer.clear();
     this.renderer.render(this.scene, this.camera);
 
@@ -1398,6 +1449,9 @@ export class Scene {
     let up: THREE.Vector3 = new THREE.Vector3(0, 0, 1);
 
     let material:THREE.MeshPhongMaterial = new THREE.MeshPhongMaterial();
+    material.polygonOffset = true;
+    material.polygonOffsetFactor = 1;
+    material.polygonOffsetUnits = 1;
     let mesh: THREE.Mesh = new THREE.Mesh(geometry, material);
 
     // Make sure the normal is normalized.
@@ -1585,8 +1639,8 @@ export class Scene {
     if (distance) {
       lightObj.distance = distance;
     }
-    if (cast_shadows) {
-      lightObj.castShadow = cast_shadows;
+    if (cast_shadows !== undefined && cast_shadows !== null) {
+      lightObj.castShadow = !!cast_shadows;
     }
 
     return lightObj;
@@ -1627,9 +1681,7 @@ export class Scene {
       lightObj.decay = falloff!;
     }
 
-    if (cast_shadows) {
-      lightObj.castShadow = cast_shadows!;
-    }
+    lightObj.castShadow = cast_shadows !== undefined ? !!cast_shadows : true;
 
     // Set the target
     let dir: THREE.Vector3 = new THREE.Vector3(0, 0, -1);
@@ -1667,18 +1719,19 @@ export class Scene {
 
     var lightObj = new THREE.DirectionalLight(color, intensity);
     lightObj.shadow.camera.near = 1;
-    lightObj.shadow.camera.far = 50;
-    lightObj.shadow.mapSize.width = 4094;
-    lightObj.shadow.mapSize.height = 4094;
-    lightObj.shadow.camera.bottom = -100;
-    lightObj.shadow.camera.right = 100;
-    lightObj.shadow.camera.top = 100;
+    lightObj.shadow.camera.far = 220;
+    lightObj.shadow.mapSize.width = 8192;
+    lightObj.shadow.mapSize.height = 8192;
+    lightObj.shadow.camera.left = -32;
+    lightObj.shadow.camera.bottom = -32;
+    lightObj.shadow.camera.right = 32;
+    lightObj.shadow.camera.top = 32;
     lightObj.shadow.bias = 0.0001;
-    lightObj.position.set(0,0,0);
-
-    if (cast_shadows) {
-      lightObj.castShadow = cast_shadows;
-    }
+    lightObj.shadow.normalBias = 0.05;
+    lightObj.shadow.radius = 15;
+    lightObj.shadow.camera.updateProjectionMatrix();
+    lightObj.position.set(0, 0, 100);
+    lightObj.castShadow = cast_shadows !== undefined ? !!cast_shadows : true;
 
     // Set the target
     let dir: THREE.Vector3 = new THREE.Vector3(0, 0, -1);
@@ -1687,6 +1740,7 @@ export class Scene {
         dir.y = direction.y;
         dir.z = direction.z;
     }
+    lightObj.userData.shadowDirection = dir.clone();
     let targetObj: THREE.Object3D = new THREE.Object3D();
     lightObj.add(targetObj);
 
