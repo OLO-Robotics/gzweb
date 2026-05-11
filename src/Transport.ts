@@ -361,8 +361,16 @@ export class Transport {
             console.error('Invalid key');
             break;
           default:
-            // Parse the message definitions.
-            this.root = parse(fileReader.result as string, {keepCase: true}).root;
+            // Parse the message definitions. Prepend any missing enum stubs that
+            // newer gz-msgs reference but the WebSocket server's proto bundle may omit.
+            let protoDefs = fileReader.result as string;
+            if (protoDefs.indexOf('enum PixelFormatType') === -1) {
+              protoDefs = protoDefs.replace(
+                /(package\s+gz\.msgs\s*;)/,
+                '$1\nenum PixelFormatType { UNKNOWN_PIXEL_FORMAT = 0; L_INT8 = 1; L_INT16 = 2; RGB_INT8 = 3; RGBA_INT8 = 4; BGRA_INT8 = 5; RGB_INT16 = 6; RGB_INT32 = 7; BGR_INT8 = 8; BGR_INT16 = 9; BGR_INT32 = 10; R_FLOAT16 = 11; RGB_FLOAT16 = 12; R_FLOAT32 = 13; RGB_FLOAT32 = 14; BAYER_RGGB8 = 15; BAYER_BGGR8 = 16; BAYER_GBRG8 = 17; BAYER_GRBG8 = 18; }'
+              );
+            }
+            this.root = parse(protoDefs, {keepCase: true}).root;
 
             // Request topics.
             this.sendMessage(['topics-types', '', '', '']);

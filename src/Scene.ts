@@ -2253,7 +2253,32 @@ export class Scene {
               return;
             }
 
-            onLoad(that.stlLoader.parse(new TextDecoder().decode(mesh)));
+            try {
+              // mesh is typically Uint8Array from WebSocket; STLLoader.parse
+              // expects ArrayBuffer. TextDecoder corrupts binary STL data.
+              const buf =
+                mesh instanceof ArrayBuffer
+                  ? mesh
+                  : mesh.buffer
+                    ? mesh.buffer.slice(
+                        mesh.byteOffset,
+                        mesh.byteOffset + mesh.byteLength,
+                      )
+                    : new Uint8Array(mesh).buffer;
+              onLoad(that.stlLoader.parse(buf));
+            } catch (parseErr: unknown) {
+              const msg =
+                parseErr instanceof Error ? parseErr.message : String(parseErr);
+              console.error(
+                'STL WebSocket fallback parse error for',
+                uri,
+                ':',
+                msg,
+              );
+              const manager = that.stlLoader.manager as WsLoadingManager;
+              manager.markAsError(uri);
+              return;
+            }
 
             // Mark the mesh as done in the loading manager.
             const manager = that.stlLoader.manager as WsLoadingManager;

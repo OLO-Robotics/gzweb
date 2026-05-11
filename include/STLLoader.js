@@ -162,7 +162,27 @@ class STLLoader extends Loader {
 		function parseBinary( data ) {
 
 			const reader = new DataView( data );
-			const faces = reader.getUint32( 80, true );
+			const dataOffset = 84;
+			const faceLength = 12 * 4 + 2;
+
+			if ( reader.byteLength < dataOffset ) {
+
+				throw new Error( 'THREE.STLLoader: Invalid binary STL (buffer smaller than header).' );
+
+			}
+
+			let faces = reader.getUint32( 80, true );
+			const maxFaces = Math.floor( ( reader.byteLength - dataOffset ) / faceLength );
+
+			if ( faces > maxFaces ) {
+
+				console.warn(
+					'THREE.STLLoader: Triangle count in header exceeds file size; parsing partial mesh.',
+					{ declared: faces, maxFaces, byteLength: reader.byteLength }
+				);
+				faces = maxFaces;
+
+			}
 
 			let r, g, b, hasColors = false, colors;
 			let defaultR, defaultG, defaultB, alpha;
@@ -187,9 +207,6 @@ class STLLoader extends Loader {
 				}
 
 			}
-
-			const dataOffset = 84;
-			const faceLength = 12 * 4 + 2;
 
 			const geometry = new BufferGeometry();
 

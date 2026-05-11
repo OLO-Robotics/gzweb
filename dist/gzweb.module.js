@@ -5743,7 +5743,17 @@ class STLLoader extends Loader {
         }
         function parseBinary(data) {
             const reader = new DataView(data);
-            const faces = reader.getUint32(80, true);
+            const dataOffset = 84;
+            const faceLength = 12 * 4 + 2;
+            if (reader.byteLength < dataOffset) {
+                throw new Error('THREE.STLLoader: Invalid binary STL (buffer smaller than header).');
+            }
+            let faces = reader.getUint32(80, true);
+            const maxFaces = Math.floor((reader.byteLength - dataOffset) / faceLength);
+            if (faces > maxFaces) {
+                console.warn('THREE.STLLoader: Triangle count in header exceeds file size; parsing partial mesh.', { declared: faces, maxFaces, byteLength: reader.byteLength });
+                faces = maxFaces;
+            }
             let r, g, b, hasColors = false, colors;
             let defaultR, defaultG, defaultB, alpha;
             // process STL header
@@ -5760,8 +5770,6 @@ class STLLoader extends Loader {
                     alpha = reader.getUint8(index + 9) / 255;
                 }
             }
-            const dataOffset = 84;
-            const faceLength = 12 * 4 + 2;
             const geometry = new BufferGeometry();
             const vertices = new Float32Array(faces * 3 * 3);
             const normals = new Float32Array(faces * 3 * 3);
@@ -7783,7 +7791,23 @@ class Scene {
                         manager.markAsError(uri);
                         return;
                     }
-                    onLoad(that.stlLoader.parse(new TextDecoder().decode(mesh)));
+                    try {
+                        // mesh is typically Uint8Array from WebSocket; STLLoader.parse
+                        // expects ArrayBuffer. TextDecoder corrupts binary STL data.
+                        const buf = mesh instanceof ArrayBuffer
+                            ? mesh
+                            : mesh.buffer
+                                ? mesh.buffer.slice(mesh.byteOffset, mesh.byteOffset + mesh.byteLength)
+                                : new Uint8Array(mesh).buffer;
+                        onLoad(that.stlLoader.parse(buf));
+                    }
+                    catch (parseErr) {
+                        const msg = parseErr instanceof Error ? parseErr.message : String(parseErr);
+                        console.error('STL WebSocket fallback parse error for', uri, ':', msg);
+                        const manager = that.stlLoader.manager;
+                        manager.markAsError(uri);
+                        return;
+                    }
                     // Mark the mesh as done in the loading manager.
                     const manager = that.stlLoader.manager;
                     manager.markAsDone(uri);
@@ -11789,8 +11813,13 @@ class Transport {
                         console.error('Invalid key');
                         break;
                     default:
-                        // Parse the message definitions.
-                        this.root = parse(fileReader.result, { keepCase: true }).root;
+                        // Parse the message definitions. Prepend any missing enum stubs that
+                        // newer gz-msgs reference but the WebSocket server's proto bundle may omit.
+                        let protoDefs = fileReader.result;
+                        if (protoDefs.indexOf('enum PixelFormatType') === -1) {
+                            protoDefs = protoDefs.replace(/(package\s+gz\.msgs\s*;)/, '$1\nenum PixelFormatType { UNKNOWN_PIXEL_FORMAT = 0; L_INT8 = 1; L_INT16 = 2; RGB_INT8 = 3; RGBA_INT8 = 4; BGRA_INT8 = 5; RGB_INT16 = 6; RGB_INT32 = 7; BGR_INT8 = 8; BGR_INT16 = 9; BGR_INT32 = 10; R_FLOAT16 = 11; RGB_FLOAT16 = 12; R_FLOAT32 = 13; RGB_FLOAT32 = 14; BAYER_RGGB8 = 15; BAYER_BGGR8 = 16; BAYER_GBRG8 = 17; BAYER_GRBG8 = 18; }');
+                        }
+                        this.root = parse(protoDefs, { keepCase: true }).root;
                         // Request topics.
                         this.sendMessage(['topics-types', '', '', '']);
                         // Request world information.

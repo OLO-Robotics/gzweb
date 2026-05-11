@@ -6992,7 +6992,25 @@
 
         function parseBinary(data) {
           var reader = new DataView(data);
+          var dataOffset = 84;
+          var faceLength = 12 * 4 + 2;
+
+          if (reader.byteLength < dataOffset) {
+            throw new Error('THREE.STLLoader: Invalid binary STL (buffer smaller than header).');
+          }
+
           var faces = reader.getUint32(80, true);
+          var maxFaces = Math.floor((reader.byteLength - dataOffset) / faceLength);
+
+          if (faces > maxFaces) {
+            console.warn('THREE.STLLoader: Triangle count in header exceeds file size; parsing partial mesh.', {
+              declared: faces,
+              maxFaces: maxFaces,
+              byteLength: reader.byteLength
+            });
+            faces = maxFaces;
+          }
+
           var r,
               g,
               b,
@@ -7018,8 +7036,6 @@
             }
           }
 
-          var dataOffset = 84;
-          var faceLength = 12 * 4 + 2;
           var geometry = new THREE$1.BufferGeometry();
           var vertices = new Float32Array(faces * 3 * 3);
           var normals = new Float32Array(faces * 3 * 3);
@@ -9339,7 +9355,21 @@
                 return;
               }
 
-              onLoad(that.stlLoader.parse(new TextDecoder().decode(mesh))); // Mark the mesh as done in the loading manager.
+              try {
+                // mesh is typically Uint8Array from WebSocket; STLLoader.parse
+                // expects ArrayBuffer. TextDecoder corrupts binary STL data.
+                var buf = mesh instanceof ArrayBuffer ? mesh : mesh.buffer ? mesh.buffer.slice(mesh.byteOffset, mesh.byteOffset + mesh.byteLength) : new Uint8Array(mesh).buffer;
+                onLoad(that.stlLoader.parse(buf));
+              } catch (parseErr) {
+                var msg = parseErr instanceof Error ? parseErr.message : String(parseErr);
+                console.error('STL WebSocket fallback parse error for', uri, ':', msg);
+                var _manager5 = that.stlLoader.manager;
+
+                _manager5.markAsError(uri);
+
+                return;
+              } // Mark the mesh as done in the loading manager.
+
 
               var manager = that.stlLoader.manager;
               manager.markAsDone(uri);
@@ -10796,9 +10826,9 @@
             _this5.findResourceCb(map, function (image, error) {
               if (error !== undefined) {
                 // Mark the texture as error in the loading manager.
-                var _manager5 = _this5.textureLoader.manager;
+                var _manager6 = _this5.textureLoader.manager;
 
-                _manager5.markAsError(map);
+                _manager6.markAsError(map);
 
                 return;
               } // Create the image element
@@ -13746,8 +13776,15 @@
                 break;
 
               default:
-                // Parse the message definitions.
-                _this3.root = protobufjs.parse(fileReader.result, {
+                // Parse the message definitions. Prepend any missing enum stubs that
+                // newer gz-msgs reference but the WebSocket server's proto bundle may omit.
+                var protoDefs = fileReader.result;
+
+                if (protoDefs.indexOf('enum PixelFormatType') === -1) {
+                  protoDefs = protoDefs.replace(/(package\s+gz\.msgs\s*;)/, '$1\nenum PixelFormatType { UNKNOWN_PIXEL_FORMAT = 0; L_INT8 = 1; L_INT16 = 2; RGB_INT8 = 3; RGBA_INT8 = 4; BGRA_INT8 = 5; RGB_INT16 = 6; RGB_INT32 = 7; BGR_INT8 = 8; BGR_INT16 = 9; BGR_INT32 = 10; R_FLOAT16 = 11; RGB_FLOAT16 = 12; R_FLOAT32 = 13; RGB_FLOAT32 = 14; BAYER_RGGB8 = 15; BAYER_BGGR8 = 16; BAYER_GBRG8 = 17; BAYER_GRBG8 = 18; }');
+                }
+
+                _this3.root = protobufjs.parse(protoDefs, {
                   keepCase: true
                 }).root; // Request topics.
 
